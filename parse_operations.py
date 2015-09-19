@@ -53,6 +53,8 @@ def main():
             for line in chunk:
                 # zip_longest will backfill any missing values with None, so we need to handle this, otherwise we'll miss the last batch
                 line_count += 1
+                if line:
+                    line = line.rstrip("\n")
                 if line and line.endswith("ms"):
                     values = {}
                     tags = {

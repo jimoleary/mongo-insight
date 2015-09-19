@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 from influxdb import InfluxDBClient
 import json
+import yaml
 import argparse
-import sys
-from utils import get_nested_items, grouper, configure_logging, write_points
+import sys, traceback
+from utils import get_nested_items, grouper, configure_logging, write_points, fixLazyJsonWithComments
 from serverstatus_metrics import common_metrics, mmapv1_metrics, wiredtiger_metrics
 
 
@@ -80,7 +81,7 @@ args = parser.parse_args()
 
 def main():
     logger = configure_logging('parse_serverstatus')
-    client = InfluxDBClient(host=args.influxdb_host, ssl=args.ssl, verify_ssl=False, port=8086, database=args.database)
+    client = InfluxDBClient(host=args.influxdb_host, ssl=False, verify_ssl=False, port=8086, database=args.database)
     with open(args.input_file, 'r') as f:
         for line_number, chunk in enumerate(grouper(f, args.batch_size)):
             # print(line_number)
@@ -89,13 +90,26 @@ def main():
                 # zip_longest will backfill any missing values with None, so we need to handle this, otherwise we'll miss the last batch
                 if line:
                     try:
-                        server_status_json = json.loads(line)
+                        # server_status_json = json.loads(line)
+                        ## hmm yaml decode is more robust wrt to trailing commas i.e '{"val":"y",}'
+                        try:
+                            server_status_json = json.loads(line)
+                        except:
+                            try:
+                                json_string = fixLazyJsonWithComments(line)
+                                server_status_json = json.loads(line)
+                            except:
+                                server_status_json = yaml.load(line)
+
                         # print((line_number + 0) * _BATCH_SIZE)
                         # print((line_number + 1) * _BATCH_SIZE)
                         common_metric_data = get_metrics("serverstatus", server_status_json, common_metrics, line_number)
                         json_points.append(create_point(*common_metric_data))
                         wiredtiger_metric_data = get_metrics("serverstatus_wiredtiger", server_status_json, wiredtiger_metrics, line_number)
-                        json_points.append(create_point(*wiredtiger_metric_data))
+                        if wiredtiger_metric_data[2]:
+                            json_points.append(create_point(*wiredtiger_metric_data))
+                        else:
+                            print("empty")
                         # for metric_data in get_metrics(server_status_json, common_metrics, line_number):
                         #     import ipdb; ipdb.set_trace()
                         #     print(json_points)
@@ -105,6 +119,7 @@ def main():
                         # for metric in get_metrics(server_status_json, mmapv1_metrics, line_number):
                         #     json_points.append(create_point(*metric))
                     except ValueError:
+                        # traceback.print_exc(file=sys.stdout)
                         logger.error("Line {} does not appear to be valid JSON - \"{}\"".format(line_number, line.strip()))
             write_points(logger, client, json_points, line_number)
 if __name__ == "__main__":
