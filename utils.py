@@ -24,9 +24,19 @@ def get_nested_items(obj, *names):
 
 def configure_logging(logger_name, args=None):
     logger = logging.getLogger(logger_name)
-    logger.setLevel(logging.DEBUG)
+    lvl = {
+        "FATAL": logging.FATAL,
+        "CRITICAL": logging.CRITICAL,
+        "ERROR": logging.ERROR ,
+        "WARNING": logging.WARNING,
+        "WARN": logging.WARN,
+        "INFO": logging.INFO,
+        "DEBUG": logging.DEBUG,
+        "NOTSET": logging.NOTSET,
+    }.get(args.level,logging.DEBUG)
+    logger.setLevel(lvl)
     ch = logging.StreamHandler()
-    ch.setLevel(logging.DEBUG)
+    ch.setLevel(lvl)
     if args is None:
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     elif args.fork:

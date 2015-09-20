@@ -10,6 +10,7 @@ from threading import Thread
 from multiprocessing import Process, Queue, Pool
 from queue import Empty
 from consumer import Consumer
+from producer import Producer
 import time
 
 _MEASUREMENT_PREFIX = "operations_"
@@ -47,51 +48,24 @@ parser.add_argument('-i', '--influxdb-host', default='localhost', help='InfluxDB
 parser.add_argument('-s', '--ssl', action='store_true', default=False, help='Enable SSl mode for InfluxDB.')
 parser.add_argument('-w', '--workers', default=8, type=int, help="# of workers to use.")
 parser.add_argument('-f', '--fork', action='store_true', default=False, help='use threads or forrk.')
+parser.add_argument('-l', '--level', default="INFO", help="The log level, defaults to INFO.")
 parser.add_argument('input_file')
 args = parser.parse_args()
 
 
-def producer(q, f):
-    line_count = 0
-    for line in f:
-        line_count += 1
-        if line:
-            line = line
-            q.put([line, line_count])
-    q.put('')
-
-class Drainer(object):
-    def __init__(self, q):
-        self.q = q
-        self.closed = False
-
-    def __iter__(self):
-        if self.closed:
-            raise StopIteration
-        while True:
-            yield self.q.get()
-
-
-def flush(q, t):
-    for i in range(t):
-        q.put('')
-
 def main():
     logger = configure_logging('parse_operations', args)
-    f = LogFile(args.input_file)
-    q = Queue()
-    d = Drainer(q)
+    producer = Producer(LogFile(args.input_file))
+
     workers = []
 
     for i in range(args.workers):
-        workers.append(Consumer(d, logger, args, i))
-
-    for worker in workers:
+        worker = Consumer(producer, logger, args, i)
+        workers.append(worker)
         worker.start()
 
-    producer(q, f)
-
-    flush(q, args.workers)
+    producer.start()
+    producer.flush(args.workers)
     for worker in workers:
         worker.join()
 
