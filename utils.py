@@ -22,12 +22,18 @@ def get_nested_items(obj, *names):
     return obj
 
 
-def configure_logging(logger_name):
+def configure_logging(logger_name, args=None):
     logger = logging.getLogger(logger_name)
     logger.setLevel(logging.DEBUG)
     ch = logging.StreamHandler()
     ch.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    if args is None:
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    elif args.fork:
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(processName)s - %(levelname)s - %(message)s')
+    else:
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(threadName)s - %(levelname)s - %(message)s')
+
     ch.setFormatter(formatter)
     logger.addHandler(ch)
     return logger
@@ -39,7 +45,7 @@ def write_points(logger, client, json_points, line_number):
     try:
         if json_points:
             client.write_points(json_points)
-            logger.info("Wrote in {} points to InfluxDB. Processed up to line {}.".format(len(json_points), line_number))
+            logger.info("Wrote in {} points to InfluxDB. Processed up to line {:<-8}".format(len(json_points), line_number))
         else:
             logger.info("Points are empty on line {}, skipping. Please check your data set.".format( line_number))
     except RequestException as e:
