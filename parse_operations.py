@@ -9,6 +9,8 @@ from log_file import LogFile
 from threading import Thread
 from multiprocessing import Process, Queue, Pool
 from queue import Empty
+from consumer import Consumer
+import time
 
 _MEASUREMENT_PREFIX = "operations_"
 
@@ -70,96 +72,6 @@ class Drainer(object):
             yield self.q.get()
 
 
-def consumer(q, logger, client):
-    logger.info("consumer starting")
-    json_points = []
-    skip = 0
-    try:
-        for tupple in q:
-            line, line_count = tupple
-            # zip_longest will backfill any missing values with None, so we need to handle this,
-            # otherwise we'll miss the last batch
-            if line is None or line == '':
-                break
-            line = line.decode('UTF-8').rstrip("\n")
-            if line and line.endswith("ms"):
-                values = {}
-                tags = {
-                    'project': args.project,
-                    'hostname': args.hostname,
-                    }
-                try:
-                    tags['operation'] = line.split("] ", 1)[1].split()[0]
-                except IndexError as e:
-                    logger.error("Unable to parse line - {} - {}".format(e, line))
-                    break
-                if tags['operation'] in ['command', 'query', 'getmore', 'insert', 'update', 'remove', 'aggregate', 'mapreduce']:
-                    # print(line.strip())
-                    thread = line.split("[", 1)[1].split("]")[0]
-                    # Alternately - print(split_line[3])
-                    if tags['operation'] == 'command':
-                        tags['command'] = line.split("command: ")[1].split()[0]
-                    if "conn" in thread:
-                        tags['connection_id'] = thread
-                    split_line = line.split()
-                    values['duration_in_milliseconds'] = int(split_line[-1].rstrip('ms'))
-                    # TODO 2.4.x timestamps have spaces
-                    timestamp = parse(split_line[0])
-                    if split_line[1].startswith("["):
-                        # 2.4 Logline:
-                        tags['namespace'] = split_line[3]
-                        for stat in reversed(split_line):
-                            if "ms" in stat:
-                                pass
-                            elif ":" in stat:
-                                key, value = stat.split(":", 1)
-                                values[key] = int(value)
-                            elif stat == "locks(micros)":
-                                pass
-                            else:
-                                break
-                    else:
-                        # 3.x logline:
-                        tags['namespace'] = split_line[5]
-                        # TODO - Parse locks
-                        pre_locks, locks = line.split("locks:{", 1)
-                        # We work backwards from the end, until we run out of key:value pairs
-                        # TODO - Can we assume these are always integers?
-                        for stat in reversed(pre_locks.split()):
-                            if ":" in stat:
-                                key, value = stat.split(":", 1)
-                                values[key] = int(value)
-                            else:
-                                break
-                                # TODO - Parse the full query plan for IXSCAN
-                        if 'planSummary: ' in line:
-                            tags['plan_summary'] = (line.split('planSummary: ', 1)[1].split()[0])
-                    json_points.append(create_point(timestamp, "operations", values, tags))
-            else:
-                skip += 1
-
-            if len(json_points) == args.batch_size:
-                # TODO - We shouldn't need to wrap this in try/except - should be handled by retry decorator
-                try:
-                    write_points(logger, client, json_points, line_count)
-                except Exception as e:
-                    logger.error("Retries exceeded. Giving up on this point.")
-                json_points=[]
-    except:
-        # exc_type, exc_value, exc_traceback = sys.exc_info()
-        # print("*** print_exception:")
-        # traceback.print_exception(exc_type, exc_value, exc_traceback,file=sys.stdout)
-        pass
-    if json_points:
-        # TODO - We shouldn't need to wrap this in try/except - should be handled by retry decorator
-        try:
-            write_points(logger, client, json_points, line_count)
-        except Exception as e:
-            logger.error("Retries exceeded. Giving up on this point.")
-
-    logger.info("consumer complete")
-
-
 def flush(q, t):
     for i in range(t):
         q.put('')
@@ -169,32 +81,20 @@ def main():
     f = LogFile(args.input_file)
     q = Queue()
     d = Drainer(q)
-    if not args.fork:
-        reader = Thread(target=producer, args=(q, f,))
-        reader.start()
-        workers = []
-        for i in range(args.workers):
-            client = InfluxDBClient(host=args.influxdb_host, ssl=args.ssl, verify_ssl=False, port=8086, database=args.database)
-            workers.append(Thread(target=consumer, args=[d, logger, client], name="Thread-{:02x}".format(i)))
+    workers = []
 
-        for worker in workers:
-            worker.start()
+    for i in range(args.workers):
+        workers.append(Consumer(d, logger, args, i))
 
-        reader.join()
-        flush(q, args.workers)
-        for worker in workers:
-            worker.join()
+    for worker in workers:
+        worker.start()
 
-    else:
-        client = InfluxDBClient(host=args.influxdb_host, ssl=args.ssl, verify_ssl=False, port=8086, database=args.database)
-        jobs = []
-        for i in range(args.workers):
-            p = Process(target=consumer, args=[d, logger, client], name="Process-{:02x}".format(i))
-            jobs.append(p)
-            p.start()
+    producer(q, f)
 
-        producer(q, f)
-        flush(q, args.workers)
+    flush(q, args.workers)
+    for worker in workers:
+        worker.join()
+
 
 if __name__ == "__main__":
     sys.exit(main())
