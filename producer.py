@@ -29,7 +29,9 @@ class Producer(object):
     def adapter(self):
         def decorate(line):
             self.line_count += 1
-            return line, self.line_count
+            pos = self.file.tell() - len(line)
+            return line, self.line_count, pos
+
         return map(decorate, self.file)
 
     def flush(self, t):

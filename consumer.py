@@ -1,9 +1,10 @@
-from utils import write_points
 from influxdb import InfluxDBClient
 from dateutil.parser import parse
 from threading import Thread
 from multiprocessing import Process
 import time
+from utils import write_points
+from retrying import retry, RetryError
 
 __author__ = 'jimoleary'
 
@@ -39,9 +40,18 @@ class Consumer(object):
                                           database=self.args.database)
         return self._client
 
-    def write_points(self, json_points, line_count):
-        write_points(self.logger, self.client, json_points, line_count)
-        self.sent += len(json_points)
+    def write(self, json_points, line_count, flush=False):
+        if json_points:
+            if flush or len(json_points) >= self.args.batch_size:
+                # TODO - We shouldn't need to wrap this in try/except - should be handled by retry decorator
+                try:
+                    write_points(self.logger, self.client, json_points, line_count)
+                except RetryError:
+                    self.logger.error('Retries exceeded. Giving up on this point %s.')
+                except Exception as e:
+                    self.logger.error('Unexpected Error %s.', e)
+                json_points = []
+        return json_points
 
     def start(self):
         if self._worker is None:
@@ -62,8 +72,8 @@ class Consumer(object):
         line_count = 0
         try:
             for tupple in self.q:
-                line, line_count = tupple
-                self.logger.debug("reading  {:< 6} {}.".format(line_count, line))
+                line, line_count, pos = tupple
+                self.logger.debug('reading %s %d(%d)', line, line_count, pos)
                 # zip_longest will backfill any missing values with None, so we need to handle this,
                 # otherwise we'll miss the last batch
                 # the main thread uses '' to exit
@@ -76,7 +86,7 @@ class Consumer(object):
                     try:
                         tags['operation'] = line.split("] ", 1)[1].split()[0]
                     except IndexError as e:
-                        self.logger.error("Unable to parse line - {} - {}".format(e, line))
+                        self.logger.error('Unable to parse line - %s - %s', e, line)
                         break
                     if tags['operation'] in ['command', 'query', 'getmore', 'insert', 'update', 'remove', 'aggregate',
                                              'mapreduce']:
@@ -120,30 +130,19 @@ class Consumer(object):
                             if 'planSummary: ' in line:
                                 tags['plan_summary'] = (line.split('planSummary: ', 1)[1].split()[0])
                         json_points.append(self.create_point(timestamp, "operations", values, tags))
-                    self.logger.debug("writing  {:< 6} {}.".format(line_count, line))
+                    self.logger.debug("writing  %6d %s.", line_count, line)
                 else:
                     skip += 1
-                    self.logger.debug("skipping  {:< 6} {}.".format(line_count, line))
+                    self.logger.debug('skipping  %6d(%6d) %s', line_count, pos, line)
 
-                if len(json_points) == self.args.batch_size:
-                    # TODO - We shouldn't need to wrap this in try/except - should be handled by retry decorator
-                    try:
-                        self.write_points(json_points, line_count)
-                    except Exception:
-                        self.logger.error("Retries exceeded. Giving up on this point.")
-                    json_points = []
+                json_points = self.write(json_points, line_count)
         except:
             # import sys, traceback
             # m = traceback.format_exc()
             # self.logger.warn(m)
             pass
-        if json_points:
-            # TODO - We shouldn't need to wrap this in try/except - should be handled by retry decorator
-            try:
-                self.write_points(json_points, line_count)
-            except Exception:
-                self.logger.error("Retries exceeded. Giving up on this point.")
+        self.write(json_points, line_count, True)
 
         time.sleep(1)
-        self.logger.info("consumer complete {}".format(self.sent))
+        self.logger.info('consumer complete %s', self.sent)
         return self.sent
