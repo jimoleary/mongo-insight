@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from utils import write_points
 from influxdb import InfluxDBClient
 from dateutil.parser import parse
@@ -33,11 +32,11 @@ class Consumer(object):
             "fields": values
         }
 
-
     @property
     def client(self):
         if self._client is None:
-            self._client = InfluxDBClient(host=self.args.influxdb_host, ssl=self.args.ssl, verify_ssl=False, port=8086, database=self.args.database)
+            self._client = InfluxDBClient(host=self.args.influxdb_host, ssl=self.args.ssl, verify_ssl=False, port=8086,
+                                          database=self.args.database)
         return self._client
 
     def write_points(self, json_points, line_count):
@@ -61,7 +60,6 @@ class Consumer(object):
         json_points = []
         skip = 0
         line_count = 0
-        sent = 0
         try:
             for tupple in self.q:
                 line, line_count = tupple
@@ -80,7 +78,8 @@ class Consumer(object):
                     except IndexError as e:
                         self.logger.error("Unable to parse line - {} - {}".format(e, line))
                         break
-                    if tags['operation'] in ['command', 'query', 'getmore', 'insert', 'update', 'remove', 'aggregate', 'mapreduce']:
+                    if tags['operation'] in ['command', 'query', 'getmore', 'insert', 'update', 'remove', 'aggregate',
+                                             'mapreduce']:
                         thread = line.split("[", 1)[1].split("]")[0]
                         # Alternately - print(split_line[3])
                         if tags['operation'] == 'command':
@@ -130,7 +129,7 @@ class Consumer(object):
                     # TODO - We shouldn't need to wrap this in try/except - should be handled by retry decorator
                     try:
                         self.write_points(json_points, line_count)
-                    except Exception as e:
+                    except Exception:
                         self.logger.error("Retries exceeded. Giving up on this point.")
                     json_points = []
         except:
@@ -142,7 +141,7 @@ class Consumer(object):
             # TODO - We shouldn't need to wrap this in try/except - should be handled by retry decorator
             try:
                 self.write_points(json_points, line_count)
-            except Exception as e:
+            except Exception:
                 self.logger.error("Retries exceeded. Giving up on this point.")
 
         time.sleep(1)

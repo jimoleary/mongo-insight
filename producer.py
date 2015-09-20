@@ -1,6 +1,4 @@
-from influxdb import InfluxDBClient
-from dateutil.parser import parse
-from multiprocessing import Process, Queue, Pool
+from multiprocessing import Queue
 
 __author__ = 'jimoleary'
 

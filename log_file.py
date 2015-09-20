@@ -1,6 +1,7 @@
 __author__ = 'jimoleary'
 import io
 
+
 class LogFile:
     def __init__(self, name):
         """
