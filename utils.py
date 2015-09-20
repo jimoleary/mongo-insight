@@ -56,7 +56,9 @@ def retry_if_io_error(exception):
             return True
     return False
 
-@retry(stop_max_attempt_number=5, wait_exponential_multiplier=1000, wait_exponential_max=120000,
+@retry(stop_max_attempt_number=5,
+       wait_exponential_multiplier=1000,
+       wait_exponential_max=120000,
        retry_on_exception=retry_if_io_error)
 def write_points(logger, client, json_points, line_number):
     # TODO - I originally wrote this to reduce code duplication - however, we need a better way to handle all the parameters
