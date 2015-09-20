@@ -3,7 +3,7 @@ from utils import write_points
 from influxdb import InfluxDBClient
 from dateutil.parser import parse
 from threading import Thread
-from multiprocessing import Process, Queue, Pool
+from multiprocessing import Process
 import time
 
 __author__ = 'jimoleary'
@@ -134,9 +134,9 @@ class Consumer(object):
                         self.logger.error("Retries exceeded. Giving up on this point.")
                     json_points = []
         except:
-            # exc_type, exc_value, exc_traceback = sys.exc_info()
-            # print("*** print_exception:")
-            # traceback.print_exception(exc_type, exc_value, exc_traceback,file=sys.stdout)
+            # import sys, traceback
+            # m = traceback.format_exc()
+            # self.logger.warn(m)
             pass
         if json_points:
             # TODO - We shouldn't need to wrap this in try/except - should be handled by retry decorator
